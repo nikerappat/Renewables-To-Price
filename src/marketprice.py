@@ -15,46 +15,49 @@ ENERGYCHARTS_URL = "https://api.energy-charts.info/price"
 REQUEST_TIMEOUT = 30  # Sekunden
 
 
-def get_energycharts_prices(
-    bzn: str,
-    start: str,
-    end: str
-) -> pd.DataFrame:
+def get_energycharts_prices(bzn: str, start: str, end: str) -> pd.DataFrame:
+    """
+    Imports hourly Day-Ahead power prices from Energy-Charts.
 
-    
-    params = {
-        "bzn": bzn,
-        "start": start,
-        "end": end
-        }
+    Parameters
+    ----------
+    bzn : str
+        Bidding-Zone-Code, e.g. "DE-LU".
+    start, end : str
+        date in format "YYYY-MM-DD".
+
+    Returns
+    -------
+    pd.DataFrame
+        Index: time (UTC, tz-aware), column: price.
+    """
+    params = {"bzn": bzn, "start": start, "end": end}
     response = requests.get(ENERGYCHARTS_URL, params=params, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     data = response.json()
 
-
     if "unix_seconds" not in data or "price" not in data:
+        raise ValueError(f"unexpected response from Energy Charts: {data}")
+
+    timestamps_raw = data["unix_seconds"]
+    prices_raw = data["price"]
+
+    if len(timestamps_raw) != len(prices_raw):
         raise ValueError(
-            f"Unexpected response from Energy Charts: {data}"
+            f"unix_seconds ({len(timestamps_raw)}) and price ({len(prices_raw)}) "
+            "are of different lengths"
         )
-        
-    
-    hourly_data=data["unix_seconds"]
-    hourly_data = pd.to_datetime(hourly_data, unit="s")
-    prices = data["price"]
+
     df = pd.DataFrame({
-        "time": hourly_data,
-        "price": prices,
+        "time": pd.to_datetime(timestamps_raw, unit="s", utc=True),
+        "price": pd.to_numeric(prices_raw, errors="coerce"),
     })
-    
+    df = df.set_index("time")
+
     return df
 
 
 if __name__ == "__main__":
-    prices = get_energycharts_prices(
-
-        "DE-LU",
-        "2025-01-01",
-        "2025-01-02"
-    )
+    prices = get_energycharts_prices("DE-LU", "2025-01-01", "2025-01-02")
     print(prices.head())
     print(prices.shape)
