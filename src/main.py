@@ -159,6 +159,10 @@ def plot_wind_corr(df: pd.DataFrame, station: str) -> None:
     0.05, 0.95,
     f"Pearson r = {r:.3f}",
     transform=plt.gca().transAxes)
+    plt.savefig(
+    f"plots/wind_corr_{station.lower()}.png",
+    dpi=300,
+    bbox_inches="tight")
     plt.show()
 
 plot_wind_corr(fulldata_arkona, "Arkona")
@@ -193,9 +197,69 @@ def plot_solar_corr(df: pd.DataFrame, station: str) -> None:
     0.05, 0.95,
     f"Pearson r = {r:.3f}",
     transform=plt.gca().transAxes)
+    plt.savefig(
+    f"plots/solar_corr_{station.lower()}.png",
+    dpi=300,
+    bbox_inches="tight")
     plt.show()
 
 plot_solar_corr(fulldata_arkona, "Arkona")
 plot_solar_corr(fulldata_aachen, "Aachen")
 plot_solar_corr(fulldata_goerlitz, "Görlitz")
 plot_solar_corr(fulldata_zugspitze, "Zugspitze")
+
+# --------------------------------------------------------------------------
+# 6) Documentation of results
+# --------------------------------------------------------------------------
+fulldata = {
+    "Arkona": fulldata_arkona,
+    "Aachen": fulldata_aachen,
+    "Görlitz": fulldata_goerlitz,
+    "Zugspitze": fulldata_zugspitze
+}
+
+def final_dict(df: pd.DataFrame, station: str) -> dict:
+    # Pearson correlations
+    r = df.corr()["price"].drop("price")
+
+    # Negative-price hours
+    negative_prices = df[df["price"] < 0]
+
+    result = {
+        "station": station,
+
+        # Correlations
+        "wind_corr": r["wind_speed"],
+        "solar_corr": r["global_solar_radiation"],
+
+        # Negative prices
+        "negative_hours": len(negative_prices),
+        "negative_share": len(negative_prices) / len(df) * 100,
+
+        # Average conditions
+        "mean_wind_negative": negative_prices["wind_speed"].mean(),
+        "mean_solar_negative": negative_prices["global_solar_radiation"].mean(),
+
+        # Overall averages
+        "mean_wind_total": df["wind_speed"].mean(),
+        "mean_solar_total": df["global_solar_radiation"].mean(),
+    }
+
+    return result
+
+
+findings = []
+
+for station, df in fulldata.items():
+    result = final_dict(df, station)
+    findings.append(result)
+
+results_df = pd.DataFrame(findings)
+
+print(results_df)
+
+results_readme = results_df.copy()
+results_readme = results_readme.round({"wind_corr": 2, "solar_corr": 2, "negative_hours":0,
+"negative_share":2, "mean_wind_negative":2, "mean_solar_negative":2, 
+"mean_wind_total":2, "mean_solar_total":2}) 
+results_readme.to_csv("results/results.csv", index=False)

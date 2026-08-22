@@ -1,0 +1,5 @@
+station,wind_corr,solar_corr,negative_hours,negative_share,mean_wind_negative,mean_solar_negative,mean_wind_total,mean_solar_total
+Arkona,-0.22,-0.36,1333,5.07,8.51,156.06,6.83,47.47
+Aachen,-0.34,-0.34,1333,5.07,6.39,159.56,4.63,46.92
+Görlitz,-0.27,-0.37,1333,5.07,5.03,162.31,3.65,48.26
+Zugspitze,-0.13,-0.35,1333,5.07,6.27,175.58,6.26,55.19
