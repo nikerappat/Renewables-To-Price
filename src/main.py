@@ -8,7 +8,9 @@ import matplotlib.pyplot as plt
 """
 Main file for comparing market prices with wind / solar forecasts
 """
-
+# --------------------------------------------------------------------------
+# 1) Load Data & Functions from other scripts
+# --------------------------------------------------------------------------
 from marketprice import get_energycharts_prices
 from observations import (
     STATIONS,
@@ -24,6 +26,10 @@ from observations import (
 )
 prices = get_energycharts_prices("DE-LU", "2023-01-01", "2025-12-31")
 prices_hourly = prices.resample("h").mean()
+
+# --------------------------------------------------------------------------
+# 2) Combine Market Information and Wind / Solar Observations
+# --------------------------------------------------------------------------
     
 def fulldata_df(station: str, prices: pd.DataFrame) -> pd.DataFrame:
     cfg = STATIONS[station]
@@ -44,6 +50,9 @@ fulldata_aachen = fulldata_df("Aachen", prices_hourly)
 fulldata_goerlitz = fulldata_df("Görlitz", prices_hourly)
 fulldata_zugspitze = fulldata_df("Zugspitze", prices_hourly)
 
+# --------------------------------------------------------------------------
+# 3) First Visualisation of Raw Data
+# --------------------------------------------------------------------------
 def plot_all_signals(df: pd.DataFrame, station: str) -> None:
     fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
     axes[0].plot(df.index, df["price"], color="black")
@@ -67,18 +76,22 @@ plot_all_signals(fulldata_aachen, "Aachen")
 plot_all_signals(fulldata_goerlitz, "Görlitz")
 plot_all_signals(fulldata_zugspitze, "Zugspitze")                
 
-
-#special case as plots show -500 price
-print(fulldata_arkona["price"].min()) #-500
-print(fulldata_arkona[fulldata_arkona["price"] == -500.0]) # 2023-07-02 12:00:00+00:00  
-print(fulldata_arkona.loc["2023-07-02 12:00:00+00:00"])
+# --------------------------------------------------------------------------
+# 3.1) Exkurs
+# --------------------------------------------------------------------------
+# calculation for Arkona for an example of a price of -500 (absolute minimum)
+# print(fulldata_arkona["price"].min()) #-500
+# print(fulldata_arkona[fulldata_arkona["price"] == -500.0]) # 2023-07-02 12:00:00+00:00  
+# print(fulldata_arkona.loc["2023-07-02 12:00:00+00:00"])
 # wind_speed                 15.1
 # wind_direction            260.0
 # global_solar_radiation    259.0
 # price                    -500.0
 # -> negative price, high wind and high solar radiation
 
-# looking at only timestamps of negative prices
+# --------------------------------------------------------------------------
+# 4) Analysing negative prices
+# --------------------------------------------------------------------------
 def neg_price_ev(df: pd.DataFrame, station: str) -> None:
     negative_price_hours = df[df["price"] < 0]
     print(f"Anzahl Stunden mit negativem Preis: {len(negative_price_hours)}")
@@ -97,4 +110,92 @@ neg_price_ev(fulldata_aachen, "Aachen")
 neg_price_ev(fulldata_goerlitz, "Görlitz")
 neg_price_ev(fulldata_zugspitze, "Zugspitze")    
 
+# --------------------------------------------------------------------------
+# 5) Correlate prices with observational data
+# --------------------------------------------------------------------------
+def pearson_corr(df: pd.DataFrame, station: str) -> None:
+    r = df.corr()["price"].drop("price")
+    print(f"\nPearson-correlation full timeframe – {station}")
+    print(r)
+    
+    # negative_price_hours = df[df["price"] < 0]
+    # r_neg = negative_price_hours.corr()["price"].drop("price")
+    # print(f"Number of negative-price hours: {len(negative_price_hours)}")
+    # print(f"\nPearson-correlation only times of negative prices – {station}")
+    # print(r_neg)
+    
+pearson_corr(fulldata_arkona, "Arkona")
+pearson_corr(fulldata_aachen, "Aachen")
+pearson_corr(fulldata_goerlitz, "Görlitz")
+pearson_corr(fulldata_zugspitze, "Zugspitze")
 
+# --------------------------------------------------------------------------
+# 6) Visualisation of correlation
+# --------------------------------------------------------------------------
+# wind data
+def plot_wind_corr(df: pd.DataFrame, station: str) -> None:
+    df = df.copy()
+    df = df.dropna(subset=["wind_speed"])
+    x = df["wind_speed"]
+    y = df["price"]
+    r = x.corr(y)
+    
+    negative_prices = df["price"] < 0
+    neg_x = df["wind_speed"][negative_prices]
+    neg_y = df["price"][negative_prices]
+    
+    plt.scatter(x, y, color="green", alpha=0.1, s=5)
+    plt.scatter(neg_x, neg_y, color="red", s=10)
+    
+    a, b = np.polyfit(x, y, 1)
+    
+    x_line = np.linspace(x.min(), x.max(), 100)
+    plt.plot(x_line, a * x_line + b, color="black", linewidth=4)
+    
+    plt.xlabel("wind speed [m/s]")
+    plt.ylabel("Market Price BZN DE-LU (€/MWh)")
+    plt.title(f"Market Price vs. Wind Speed – {station}")
+    plt.text(
+    0.05, 0.95,
+    f"Pearson r = {r:.3f}",
+    transform=plt.gca().transAxes)
+    plt.show()
+
+plot_wind_corr(fulldata_arkona, "Arkona")
+plot_wind_corr(fulldata_aachen, "Aachen")
+plot_wind_corr(fulldata_goerlitz, "Görlitz")
+plot_wind_corr(fulldata_zugspitze, "Zugspitze")
+
+#solar data
+def plot_solar_corr(df: pd.DataFrame, station: str) -> None:
+    df = df.copy()
+    df = df.dropna(subset=["global_solar_radiation"])
+    x = df["global_solar_radiation"]
+    y = df["price"]
+    r = x.corr(y)
+    
+    negative_prices = df["price"] < 0
+    neg_x = df["global_solar_radiation"][negative_prices]
+    neg_y = df["price"][negative_prices]
+    
+    plt.scatter(x, y, color="green", alpha=0.1, s=5)
+    plt.scatter(neg_x, neg_y, color="red", s=10)
+    
+    a, b = np.polyfit(x, y, 1)
+    
+    x_line = np.linspace(x.min(), x.max(), 100)
+    plt.plot(x_line, a * x_line + b, color="black", linewidth=4)
+    
+    plt.xlabel("global solar radiation J/cm^2")
+    plt.ylabel("Market Price BZN DE-LU (€/MWh)")
+    plt.title(f"Market Price vs. Global Solar radiation – {station}")
+    plt.text(
+    0.05, 0.95,
+    f"Pearson r = {r:.3f}",
+    transform=plt.gca().transAxes)
+    plt.show()
+
+plot_solar_corr(fulldata_arkona, "Arkona")
+plot_solar_corr(fulldata_aachen, "Aachen")
+plot_solar_corr(fulldata_goerlitz, "Görlitz")
+plot_solar_corr(fulldata_zugspitze, "Zugspitze")
