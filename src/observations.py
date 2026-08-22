@@ -20,12 +20,11 @@ import requests
 # --------------------------------------------------------------------------
 # Konfiguration
 # --------------------------------------------------------------------------
-REQUEST_TIMEOUT = 30          # Sekunden für HTTP-Requests
-MISSING_VALUE = -999          # DWD-Kennzeichnung für fehlende Werte
-START_DATE = pd.Timestamp("2023-01-01")
-END_DATE = pd.Timestamp("2025-12-31")
-INTERPOLATION_LIMIT = 3       # max. aufeinanderfolgende Zeitschritte, die interpoliert werden
-
+REQUEST_TIMEOUT = 30          # seconsd for HTTP-Requests
+MISSING_VALUE = -999          # DWD-notion for missing values
+START_DATE = pd.Timestamp("2023-01-01", tz="UTC") #chosen individually
+END_DATE = pd.Timestamp("2025-12-31", tz="UTC") #chosen individually
+INTERPOLATION_LIMIT = 3       # max. consecutive time steps to be interpolated
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "DWD Data"
 
@@ -39,24 +38,28 @@ STATIONS = {
     "Arkona": {
         "id": "00183",
         "role": "Norden",
+        "longitude": 13.43,
         "wind_file": DATA_DIR / "wind" / "Arkona Wind_produkt_ff_stunde_19730101_20251231_00183.txt",
         "solar_file": DATA_DIR / "solar" / "Arkona Solar_produkt_st_stunde_19810101_20260630_00183.txt",
     },
     "Aachen": {
         "id": "15000",
         "role": "Westen",
+        "longitude": 6.02,
         "wind_file": DATA_DIR / "wind" / "Aachen Wind_produkt_ff_stunde_20110401_20251231_15000.txt",
         "solar_file": DATA_DIR / "solar" / "Aachen Solar_produkt_st_stunde_20230101_20260630_15000.txt",
     },
     "Görlitz": {
         "id": "01684",
         "role": "Osten",
+        "longitude": 14.95,
         "wind_file": DATA_DIR / "wind" / "Görlitz Wind_produkt_ff_stunde_19630101_20251231_01684.txt",
         "solar_file": DATA_DIR / "solar" / "Görlitz Solar_produkt_st_stunde_20010101_20260630_01684.txt",
     },
     "Zugspitze": {
         "id": "05792",
         "role": "Süden",
+        "longitude": 10.98,
         "wind_file": DATA_DIR / "wind" / "Zugspitze Wind_produkt_ff_stunde_19760101_20251231_05792.txt",
         "solar_file": DATA_DIR / "solar" / "Zugspitze Solar_produkt_st_stunde_20130101_20260630_05792.txt",
     },
@@ -116,6 +119,33 @@ def document_station_selection() -> None:
     print("eastern most wind station:", wind_ok.loc[wind_ok["longitude"].idxmax(), "name"])
     print("western most wind station:", wind_ok.loc[wind_ok["longitude"].idxmin(), "name"])
 
+#--------------------------------------------------------------------------
+# 2) time zone conversion: WOZ -> UTC
+# --------------------------------------------------------------------------
+def equation_of_time_minutes(day_of_year) -> np.ndarray:
+    """
+    Approximation for Equation of Time (in minutes)
+    seasonal deviation between true and mean solar time
+    day_of_year = from timestamps.dt.dayofyear
+    starting point is day 81 (astronomical convention since it is spring equilibrium so day & night have appr. same length)
+    day 81 has 0 deg
+    """
+    b = 2 * np.pi * (day_of_year - 81) / 364
+    return 9.87 * np.sin(2 * b) - 7.53 * np.cos(b) - 1.5 * np.sin(b)
+ 
+ 
+def woz_to_utc(woz_timestamps: pd.Series, longitude_deg: float) -> pd.Series:
+    """
+    Convserion of WOZ (used in solar data by DWD) to UTC
+    Neccessary to perform further analysis and merge with energy prices and wind data
+    UTC = WOZ time - longitude offset - equation of time
+    longitude offset = 4 min / degree of longitude 
+    earth rotates 360° in 24 h → 360°/24h = 15° / h → 1° = 4 min
+    """
+    eot_minutes = equation_of_time_minutes(woz_timestamps.dt.dayofyear)
+    mean_solar_offset_minutes = longitude_deg / 15 * 60
+    total_offset = pd.to_timedelta(mean_solar_offset_minutes + eot_minutes, unit="m")
+    return woz_timestamps - total_offset
 
 # --------------------------------------------------------------------------
 # 2) Load & Process Raw Data
@@ -123,34 +153,49 @@ def document_station_selection() -> None:
 def load_wind(path: Path) -> pd.DataFrame:
     """Reads hourly wind data, sorted by time, and renames columns."""
     df = pd.read_csv(path, sep=";", skipinitialspace=True)
-    df["time"] = pd.to_datetime(df["MESS_DATUM"].astype(str), format="%Y%m%d%H")
+    df["time"] = pd.to_datetime(df["MESS_DATUM"].astype(str), format="%Y%m%d%H", utc=True)
     df = df.set_index("time")
     return df[["F", "D"]].rename(columns={"F": "wind_speed", "D": "wind_direction"})
 
 
-def load_solar(path: Path) -> pd.DataFrame:
+def load_solar(path: Path, longitude_deg: float) -> pd.DataFrame:
     """
     Reads hourly solar radiation values (global radiation FG_LBERG).
     """
     df = pd.read_csv(path, sep=";")
-    df["time"] = pd.to_datetime(df["MESS_DATUM_WOZ"], format="%Y%m%d%H:%M")
+    woz = pd.to_datetime(df["MESS_DATUM_WOZ"], format="%Y%m%d%H:%M")
+    utc = woz_to_utc(woz, longitude_deg).dt.tz_localize("UTC")
+    df["time"] = utc.dt.round("h")
     df = df.set_index("time")
     return df[["FG_LBERG"]].rename(columns={"FG_LBERG": "global_solar_radiation"})
-
+ 
 
 def _dedupe_index(df: pd.DataFrame, label: str) -> pd.DataFrame:
-    """Removes duplicate timestamps (e.g., due to daylight saving time), and retains the first value."""
-    n_dupes = int(df.index.duplicated().sum())
-    if n_dupes:
-        print(f"  [{label}] {n_dupes} Duplicate timestamps found -> removed (first value retained)")
-        df = df[~df.index.duplicated(keep="first")]
+    """
+    removes duplicates sends a warning if values differ between flagged duplicates so the user has to
+    manually look them up to see whether they are coming from change of time zones
+    """
+    dupe_mask = df.index.duplicated(keep=False)
+    if not dupe_mask.any():
+        return df.sort_index()
+ 
+    n_dupes = int(dupe_mask.sum())
+    dupes = df[dupe_mask].sort_index()
+    print(f"  [{label}] {n_dupes} Zeilen mit doppeltem Zeitstempel gefunden")
+ 
+    inconsistent = dupes.groupby(dupes.index).nunique().gt(1).any(axis=1)
+    if inconsistent.any():
+        print(f"  [{label}] WARNUNG: Duplikate mit abweichenden Werten -> bitte manuell prüfen:")
+        print(dupes.loc[inconsistent[inconsistent].index])
+ 
+    df = df[~df.index.duplicated(keep="first")]
     return df.sort_index()
 
 
-def build_station_dataframe(wind_file: Path, solar_file: Path, label: str) -> pd.DataFrame:
+def build_station_dataframe(wind_file: Path, solar_file: Path, longitude_deg: float, label: str) -> pd.DataFrame:
     """Loads, links, and cleans up wind and solar data from a station."""
     df_wind = _dedupe_index(load_wind(wind_file), f"{label} Wind")
-    df_solar = _dedupe_index(load_solar(solar_file), f"{label} Solar")
+    df_solar = _dedupe_index(load_solar(solar_file, longitude_deg), f"{label} Solar")
 
     df = df_wind.join(df_solar, how="outer")
 
@@ -172,7 +217,7 @@ def nan_dealer(df: pd.DataFrame) -> pd.DataFrame:
 
     Wind direction is NOT interpolated, as it is a circular quantity
     """
-    df = df.copy()  # IMPORTANT: Prevents in-place mutation of the passed-in data frame
+    df = df.copy()  
     cols = ["wind_speed", "global_solar_radiation"]
     df[cols] = df[cols].interpolate(
         method="time", limit=INTERPOLATION_LIMIT, limit_direction="both", axis=0
@@ -249,7 +294,7 @@ def main():
 
     for name, cfg in STATIONS.items():
         print(f"\n=== {name} ({cfg['role']}, Station {cfg['id']}) ===")
-        df = build_station_dataframe(cfg["wind_file"], cfg["solar_file"], name)
+        df = build_station_dataframe(cfg["wind_file"], cfg["solar_file"], cfg["longitude"], name)
         raw[name] = df
 
         missing_share = df.isna().mean() * 100
@@ -276,3 +321,23 @@ if __name__ == "__main__":
     plot_rolling_mean(arkona_interpol,"wind_speed", "Arkona", window=168)
     
     zugspitze_interpol = interpolated_stations["Zugspitze"]
+    
+    # further testing, especially the conversion from WOZ to UTC in solar data
+    test_time = pd.Series([pd.Timestamp("2023-06-15 12:00:00")])
+    longitude_goerlitz = 14.95
+    
+    day_of_year = test_time.dt.dayofyear
+    print("day of year:", day_of_year.values)
+    
+    eot = equation_of_time_minutes(day_of_year)
+    print("equation of time (min):", eot.values)
+    
+    longitude_offset = longitude_goerlitz / 15 * 60
+    print("longitude offset (min):", longitude_offset)
+    
+    total_offset_minutes = longitude_offset + eot
+    print("total-Offset (min):", total_offset_minutes.values)
+    
+    utc_result = woz_to_utc(test_time, longitude_goerlitz)
+    print("WOZ:", test_time.values)
+    print("UTC:", utc_result.values)
