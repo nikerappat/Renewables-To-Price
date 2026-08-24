@@ -84,9 +84,9 @@ the prices are therefore not station-specific
 
 <!--
 
-!\[Correlation Wind Speed vs. Price for Station Arkona](https://github.com/nikerappat/Renewables-To-Price/blob/main/plots/wind\_corr\_arkona.png)
+!\[Correlation Wind Speed vs. Price for Station Arkona](plots/wind\_corr\_arkona.png)
 
-!\[Correlation Solar Radiation vs. Price for Station Arkona](https://github.com/nikerappat/Renewables-To-Price/blob/main/plots/solar\_corr\_arkona.png)
+!\[Correlation Solar Radiation vs. Price for Station Arkona](plots/solar\_corr\_arkona.png)
 
 \-->
 
