@@ -24,7 +24,7 @@ Is it possible to detect a recognizable correlation between meteorological data 
 
 - **Missing values**: the market price series has no missing data (`NaN`); DWD data does (marked as `-999`, flagged in code as `NaN`)
   - Time-based interpolation is applied, but only for gaps of three or fewer consecutive timestamps (hours)
-  - Longer, systematic gaps are deliberately left as `NaN` — no artificial smoothing of the values
+  - Longer, systematic gaps are deliberately left as `NaN` meaning no artificial smoothing of the values
 - **Time zone correction**: market price and wind data are given in UTC; solar data requires a conversion from WOZ (true local time) to UTC
   - Timestamps in the solar data are converted to UTC based on longitude offset and the equation of time
   - Timestamps are then rounded to the nearest hour to establish a consistent time basis for comparison with wind data and electricity prices
@@ -57,7 +57,7 @@ Is it possible to detect a recognizable correlation between meteorological data 
 
 - All stations show a negative correlation between wind/solar observations and electricity price
   - This aligns with the merit-order hypothesis: higher renewable power input through PV or wind turbines correlates with lower energy prices
-- Correlation strength is weak to moderate (between 0.13–0.37) — not a strong relationship, but a recognizable pattern
+- Correlation strength is weak to moderate (between 0.13–0.37) meaning it is not a strong relationship, but a recognizable pattern
 - The solar effect is more pronounced than the wind effect (except for Aachen, where they are about the same)
   - Solar input is concentrated during the day (mainly around noon), which results in a sharp midday peak occurring simultaneously across all of Germany
   - Wind input is more spatially distributed and more evenly spread throughout the day
